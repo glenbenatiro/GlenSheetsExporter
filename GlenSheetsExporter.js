@@ -116,7 +116,7 @@ const DEFAULT_RUNTIME_EXPORT_SETTINGS = {
     type: ExportRangeType.WORKBOOK,
     sheetName: null,
     sheetIndex: null,
-    range: null,
+    sheetRange: null,
   },
 };
 
@@ -145,6 +145,45 @@ function exportSpreadsheet_(spreadsheet, exportSettings) {
   );
 
   return exportFile;
+}
+
+
+function sheetColumnLettersToNumber(column) {
+  let number = 0;
+
+  for (let i = 0; i < column.length; i++) {
+      number = number * 26 + (column.charCodeAt(i) - 'A'.charCodeAt(0) + 1);
+  }
+
+  return number;
+}
+
+function cellToRC(cell) {
+  const match = cell.match(/([A-Z]+)(\d+)/);
+
+  return {
+      column: sheetColumnLettersToNumber(match[1]),
+      row: parseInt(match[2], 10),
+  };
+}
+
+function sheetA1RangeToRC12_(a1Notation) {
+  const rangeParts = a1Notation.split(':');
+  const startCell = cellToRC(rangeParts[0]);
+  
+  let endCell;
+  if (rangeParts.length > 1) {
+      endCell = cellToRC(rangeParts[1]);
+  } else {
+      endCell = startCell;
+  }
+
+  return {
+      R1: startCell.row,  // First row
+      C1: startCell.column,  // First column
+      R2: endCell.row,    // Last row
+      C2: endCell.column  // Last column
+  };
 }
 
 // =============================================================================
@@ -178,9 +217,13 @@ class GlenSheetsExplorer {
     return this;
   }
 
-  setExportRange(exportRangeType, param1) {
+  setExportRange(exportRangeType, param1, param2) {
     switch (exportRangeType) {
-      case ExportRangeType.SHEET: {
+      case ExportRangeType.WORKBOOK:
+        break;
+
+      case ExportRangeType.SHEET:
+      case ExportRangeType.RANGE: {
         switch (typeof param1) {
           case 'string':
             this.exportSettings_.runtime.exportRange.sheetName = param1;
@@ -196,15 +239,12 @@ class GlenSheetsExplorer {
             );
         }
 
+        if (exportRangeType === ExportRangeType.RANGE) {
+          this.exportSettings_.runtime.exportRange.sheetRange = param2;
+        }
+
         break;
       }
-
-      case ExportRangeType.WORKBOOK:
-        break;
-
-      case ExportRangeType.RANGE:
-        this.exportSettings_.runtime.exportRange.range = param1;
-        break;
 
       default: {
         throw new Error(
@@ -220,19 +260,22 @@ class GlenSheetsExplorer {
   preExport_(spreadsheet) {
     const exportSettings = this.exportSettings_.actual;
 
-    // 1. exportRangeType
-    switch (this.exportSettings_.runtime.exportRange.type) {
+    delete exportSettings[EXPORT_SETTINGS.SHEET_ID];
+    delete exportSettings[EXPORT_SETTINGS.IR];
+    delete exportSettings[EXPORT_SETTINGS.IC];
+    delete exportSettings[EXPORT_SETTINGS.R1];
+    delete exportSettings[EXPORT_SETTINGS.C1];
+    delete exportSettings[EXPORT_SETTINGS.R2];
+    delete exportSettings[EXPORT_SETTINGS.C2];
+
+    const exportRangeType = this.exportSettings_.runtime.exportRange.type;
+
+    switch (exportRangeType) {
       case ExportRangeType.WORKBOOK:
-        delete exportSettings[EXPORT_SETTINGS.SHEET_ID];
-        delete exportSettings[EXPORT_SETTINGS.IR];
-        delete exportSettings[EXPORT_SETTINGS.IC];
-        delete exportSettings[EXPORT_SETTINGS.R1];
-        delete exportSettings[EXPORT_SETTINGS.C1];
-        delete exportSettings[EXPORT_SETTINGS.R2];
-        delete exportSettings[EXPORT_SETTINGS.C2];
         break;
 
-      case ExportRangeType.SHEET: {
+      case ExportRangeType.SHEET:
+      case ExportRangeType.RANGE: {
         const targetSheetName =
           this.exportSettings_.runtime.exportRange.sheetName;
         const sheet = spreadsheet
@@ -247,11 +290,20 @@ class GlenSheetsExplorer {
           exportSettings[EXPORT_SETTINGS.SHEET_ID] = sheet.getSheetId();
         }
 
+        if (exportRangeType === ExportRangeType.RANGE) {
+          exportSettings[EXPORT_SETTINGS.IR] = false;
+          exportSettings[EXPORT_SETTINGS.IC] = false;
+
+          const rc12 = sheetA1RangeToRC12_(this.exportSettings_.runtime.exportRange.sheetRange);
+
+          exportSettings[EXPORT_SETTINGS.R1] = rc12.R1 - 1;
+          exportSettings[EXPORT_SETTINGS.C1] = rc12.C1 - 1;
+          exportSettings[EXPORT_SETTINGS.R2] = rc12.R2;
+          exportSettings[EXPORT_SETTINGS.C2] = rc12.C2;
+        }
+
         break;
       }
-
-      case ExportRangeType.RANGE:
-        break;
 
       default:
         throw new Error();
