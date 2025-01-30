@@ -120,14 +120,14 @@ const DEFAULT_RUNTIME_EXPORT_SETTINGS = {
   },
 };
 
-const GLENSHEETSTOPDF_DEFAULT_EXPORT_SETTINGS = {
+const GLENSHEETSEXPORTER_DEFAULT_EXPORT_SETTINGS = {
   actual: DEFAULT_EXPORT_SETTINGS,
   runtime: DEFAULT_RUNTIME_EXPORT_SETTINGS,
 };
 
 // =============================================================================
 
-function exportSpreadsheet_(spreadsheet, exportSettings) {
+function createExportURL_(spreadsheet, exportSettings) {
   const spreadsheetID = spreadsheet.getId();
   const baseURL = `https://docs.google.com/spreadsheets/d/${spreadsheetID}/export?`;
   const queryParams = Object.entries(exportSettings)
@@ -137,6 +137,11 @@ function exportSpreadsheet_(spreadsheet, exportSettings) {
     }, [])
     .join('&');
   const exportURL = `${baseURL}${queryParams}`;
+
+  return exportURL;
+}
+
+function exportSpreadsheet_(spreadsheet, exportURL) {
   const response = UrlFetchApp.fetch(exportURL, {
     headers: { Authorization: `Bearer ${ScriptApp.getOAuthToken()}` },
   });
@@ -147,12 +152,11 @@ function exportSpreadsheet_(spreadsheet, exportSettings) {
   return exportFile;
 }
 
-
 function sheetColumnLettersToNumber(column) {
   let number = 0;
 
-  for (let i = 0; i < column.length; i++) {
-      number = number * 26 + (column.charCodeAt(i) - 'A'.charCodeAt(0) + 1);
+  for (let i = 0; i < column.length; i += 1) {
+    number = number * 26 + (column.charCodeAt(i) - 'A'.charCodeAt(0) + 1);
   }
 
   return number;
@@ -162,27 +166,27 @@ function cellToRC(cell) {
   const match = cell.match(/([A-Z]+)(\d+)/);
 
   return {
-      column: sheetColumnLettersToNumber(match[1]),
-      row: parseInt(match[2], 10),
+    column: sheetColumnLettersToNumber(match[1]),
+    row: parseInt(match[2], 10),
   };
 }
 
 function sheetA1RangeToRC12_(a1Notation) {
   const rangeParts = a1Notation.split(':');
   const startCell = cellToRC(rangeParts[0]);
-  
+
   let endCell;
   if (rangeParts.length > 1) {
-      endCell = cellToRC(rangeParts[1]);
+    endCell = cellToRC(rangeParts[1]);
   } else {
-      endCell = startCell;
+    endCell = startCell;
   }
 
   return {
-      R1: startCell.row,  // First row
-      C1: startCell.column,  // First column
-      R2: endCell.row,    // Last row
-      C2: endCell.column  // Last column
+    R1: startCell.row, // First row
+    C1: startCell.column, // First column
+    R2: endCell.row, // Last row
+    C2: endCell.column, // Last column
   };
 }
 
@@ -190,7 +194,12 @@ function sheetA1RangeToRC12_(a1Notation) {
 
 class GlenSheetsExplorer {
   constructor() {
-    this.exportSettings_ = GLENSHEETSTOPDF_DEFAULT_EXPORT_SETTINGS;
+    this.exportSettings_ = GLENSHEETSEXPORTER_DEFAULT_EXPORT_SETTINGS;
+  }
+
+  setFormat(format) {
+    this.exportSettings_.actual[EXPORT_SETTINGS.FORMAT] = format;
+    return this;
   }
 
   setSize(size) {
@@ -257,7 +266,7 @@ class GlenSheetsExplorer {
     return this;
   }
 
-  preExport_(spreadsheet) {
+  getPreExportSettings(spreadsheet) {
     const exportSettings = this.exportSettings_.actual;
 
     delete exportSettings[EXPORT_SETTINGS.SHEET_ID];
@@ -294,7 +303,9 @@ class GlenSheetsExplorer {
           exportSettings[EXPORT_SETTINGS.IR] = false;
           exportSettings[EXPORT_SETTINGS.IC] = false;
 
-          const rc12 = sheetA1RangeToRC12_(this.exportSettings_.runtime.exportRange.sheetRange);
+          const rc12 = sheetA1RangeToRC12_(
+            this.exportSettings_.runtime.exportRange.sheetRange,
+          );
 
           exportSettings[EXPORT_SETTINGS.R1] = rc12.R1 - 1;
           exportSettings[EXPORT_SETTINGS.C1] = rc12.C1 - 1;
@@ -309,11 +320,21 @@ class GlenSheetsExplorer {
         throw new Error();
     }
 
-    return exportSpreadsheet_(spreadsheet, exportSettings);
+    return exportSettings;
+  }
+
+  getExportURL(spreadsheet) {
+    const preExportSettings = this.getPreExportSettings(spreadsheet);
+
+    return createExportURL_(spreadsheet, preExportSettings);
   }
 
   exportBySpreadsheet(spreadsheet) {
-    return this.preExport_(spreadsheet);
+    const preExportSettings = this.getPreExportSettings(spreadsheet);
+
+    const exportURL = createExportURL_(spreadsheet, preExportSettings);
+
+    return exportSpreadsheet_(spreadsheet, exportURL);
   }
 
   exportByURL(url) {
@@ -323,7 +344,7 @@ class GlenSheetsExplorer {
 
 // =============================================================================
 
-function createInstance() {
+function createService() {
   return new GlenSheetsExplorer();
 }
 
